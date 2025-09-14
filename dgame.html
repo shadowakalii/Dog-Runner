@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dog Runner (HTML / Canvas)</title>
+  <style>
+    :root{--bg:#ffffff;--ground:#333;--text:#111}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial}
+    .wrap{height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(#e6f2ff,#ffffff)}
+    canvas{background:linear-gradient(#aee,#fff);box-shadow:0 10px 30px rgba(0,0,0,0.12);border-radius:8px}
+    .info{position:fixed;left:16px;top:16px;color:var(--text);font-size:14px}
+    .footer{position:fixed;right:16px;top:16px;color:#444;font-size:13px}
+    @media (max-width:700px){canvas{width:100%;height:auto}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="800" height="400"></canvas>
+  </div>
+  <div class="info">Space / Up / Tap = Jump • R = Restart</div>
+  <div class="footer">Dog Runner — simple HTML Canvas game</div>
+
+  <script>
+    // Dog Runner - single-file HTML + JS
+    (() => {
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d');
+      const WIDTH = canvas.width;
+      const HEIGHT = canvas.height;
+      const GROUND_Y = HEIGHT - 70;
+
+      // Game state
+      let running = true;
+      let gameOver = false;
+      let score = 0;
+      let speed = 6; // obstacle speed
+      let spawnTimer = 0;
+
+      // Dog (player)
+      const dog = {
+        x: 90,
+        y: GROUND_Y - 50,
+        w: 50,
+        h: 40,
+        vy: 0,
+        gravity: 0.8,
+        jumpForce: -14,
+        onGround: true
+      };
+
+      // Obstacles
+      const obstacles = [];
+
+      // Input
+      let keys = {};
+
+      function reset() {
+        obstacles.length = 0;
+        score = 0;
+        speed = 6;
+        spawnTimer = 0;
+        gameOver = false;
+        dog.y = GROUND_Y - dog.h;
+        dog.vy = 0;
+        dog.onGround = true;
+        loop(performance.now());
+      }
+
+      // Simple rectangle-based collision
+      function rectsCollide(a, b) {
+        return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+      }
+
+      function spawnObstacle() {
+        const h = 30 + Math.floor(Math.random() * 50);
+        const w = 20 + Math.floor(Math.random() * 40);
+        const y = GROUND_Y - h;
+        obstacles.push({x: WIDTH + 20, y, w, h});
+      }
+
+      // Simple dog drawing (a cute stylised dog using shapes)
+      function drawDog(x, y, w, h) {
+        ctx.save();
+        // body
+        ctx.fillStyle = '#d0843f';
+        ctx.fillRect(x + 6, y + 14, w - 12, h - 14);
+        // head
+        ctx.beginPath();
+        ctx.ellipse(x + w - 8, y + 14, 12, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // ear
+        ctx.fillStyle = '#b05a2a';
+        ctx.fillRect(x + w - 20, y + 6, 6, 12);
+        // tail
+        ctx.fillStyle = '#b05a2a';
+        ctx.fillRect(x - 6, y + 8, 6, 6);
+        // eye
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.arc(x + w - 4, y + 12, 3, 0, Math.PI*2); ctx.fill();
+        // legs
+        ctx.fillStyle = '#8b561e';
+        ctx.fillRect(x + 8, y + h - 6, 8, 6);
+        ctx.fillRect(x + w - 20, y + h - 6, 8, 6);
+        ctx.restore();
+      }
+
+      // Draw everything
+      function draw() {
+        // background
+        ctx.clearRect(0, 0, WIDTH, HEIGHT);
+        // sky gradient
+        const g = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+        g.addColorStop(0, '#cfefff');
+        g.addColorStop(1, '#ffffff');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+        // ground
+        ctx.fillStyle = '#e6e6e6';
+        ctx.fillRect(0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(0, GROUND_Y - 2, WIDTH, 4);
+
+        // score
+        ctx.fillStyle = '#111';
+        ctx.font = '20px system-ui, Arial';
+        ctx.fillText('Score: ' + Math.floor(score), 12, 28);
+
+        // dog
+        drawDog(dog.x, dog.y, dog.w, dog.h);
+
+        // obstacles
+        ctx.fillStyle = '#3aa76d';
+        obstacles.forEach(obs => {
+          ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+        });
+
+        if (gameOver) {
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          ctx.fillRect(0, 0, WIDTH, HEIGHT);
+          ctx.fillStyle = '#fff';
+          ctx.font = '36px system-ui, Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('Game Over', WIDTH/2, HEIGHT/2 - 10);
+          ctx.font = '18px system-ui, Arial';
+          ctx.fillText('Press R to restart', WIDTH/2, HEIGHT/2 + 24);
+          ctx.textAlign = 'start';
+        }
+      }
+
+      // Game update
+      let lastTime = 0;
+      function update(dt) {
+        if (gameOver) return;
+
+        // Handle input: jump
+        if ((keys[' '] || keys['ArrowUp'] || keys['KeyW'] || keys['Touch']) && dog.onGround) {
+          dog.vy = dog.jumpForce;
+          dog.onGround = false;
+        }
+
+        // physics
+        dog.vy += dog.gravity;
+        dog.y += dog.vy;
+        if (dog.y > GROUND_Y - dog.h) {
+          dog.y = GROUND_Y - dog.h;
+          dog.vy = 0;
+          dog.onGround = true;
+        }
+
+        // obstacles movement
+        for (let i = obstacles.length -1; i >= 0; i--) {
+          obstacles[i].x -= speed;
+          if (obstacles[i].x + obstacles[i].w < 0) obstacles.splice(i,1);
+        }
+
+        // spawn logic
+        spawnTimer -= dt;
+        if (spawnTimer <= 0) {
+          spawnObstacle();
+          spawnTimer = 900 + Math.random()*800; // ms
+        }
+
+        // increase difficulty slowly
+        score += dt * 0.01 * (speed/6);
+        if (Math.floor(score) % 100 === 0) {
+          // every 100 points small speed bump (but avoid rapid multiple bumps)
+          speed = 6 + Math.floor(score / 200);
+        }
+
+        // collision
+        const playerRect = {x: dog.x, y: dog.y, w: dog.w, h: dog.h};
+        for (const obs of obstacles) {
+          if (rectsCollide(playerRect, obs)) {
+            gameOver = true;
+            break;
+          }
+        }
+      }
+
+      // Main loop using requestAnimationFrame
+      function loop(timestamp) {
+        if (!lastTime) lastTime = timestamp;
+        const dt = timestamp - lastTime; // ms
+        lastTime = timestamp;
+
+        update(dt);
+        draw();
+
+        if (!gameOver) requestAnimationFrame(loop);
+        else {
+          // stop animation until restart
+        }
+      }
+
+      // Input handlers
+      window.addEventListener('keydown', (e) => {
+        keys[e.code.replace('Key','')] = true; // support 'Space' mapping below
+        keys[e.key] = true;
+        if (e.code === 'Space' || e.code === 'ArrowUp') e.preventDefault();
+        if (e.key === 'r' || e.key === 'R') reset();
+      });
+      window.addEventListener('keyup', (e) => {
+        keys[e.code.replace('Key','')] = false;
+        keys[e.key] = false;
+      });
+
+      // Make canvas respond to clicks/taps to jump and restart when game over
+      canvas.addEventListener('pointerdown', (e) => {
+        if (gameOver) reset();
+        else keys['Touch'] = true;
+      });
+      canvas.addEventListener('pointerup', () => { keys['Touch'] = false; });
+
+      // Start game
+      reset();
+
+      // expose debug for console if needed
+      window.__dogRunner = {reset, obstacles};
+    })();
+  </script>
+</body>
+</html>
